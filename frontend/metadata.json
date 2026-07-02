@@ -1,0 +1,6 @@
+{
+  "name": "Java Cloud Storage API & Playground",
+  "description": "An interactive full-stack suite simulating a Java Spring Boot GCS/S3 Cloud Storage API with full endpoint testing, visual bucket explorer, credential management, and ready-to-run Java controller source code.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
