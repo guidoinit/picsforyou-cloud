@@ -23,7 +23,8 @@ import {
   Lock,
   Unlock,
   CloudLightning,
-  ExternalLink
+  ExternalLink,
+  FileText
 } from "lucide-react";
 
 
@@ -99,7 +100,7 @@ export default function App() {
   const [cardCvv, setCardCvv] = useState<string>("");
 
   // Navigation & UI Tabs
-  const [activeTab, setActiveTab] = useState<"explorer" | "publisher" | "plans">("explorer");
+  const [activeTab, setActiveTab] = useState<"explorer" | "publisher" | "plans" | "documentation">("explorer");
 
   const [activeMethodIndex, setActiveMethodIndex] = useState<number>(0);
 
@@ -1164,13 +1165,15 @@ export default function App() {
             <div className="flex items-center gap-2 text-text">
               <span className="text-accent font-bold">&gt;</span>
               <span className="text-green-400 font-semibold">
-                {activeTab === "publisher" ? "POST" : activeTab === "plans" ? "GET" : "GET"}
+                {activeTab === "publisher" ? "POST" : activeTab === "plans" ? "GET" : activeTab === "documentation" ? "GET" : "GET"}
               </span>
               <span>
                 {activeTab === "publisher" 
                   ? "/api/v1/storage/upload" 
                   : activeTab === "plans"
                   ? "/api/v1/plans"
+                  : activeTab === "documentation"
+                  ? "/api/v1/docs"
                   : "/api/v1/storage/files"
                 }
               </span>
@@ -1202,6 +1205,13 @@ export default function App() {
               className={`px-6 py-4 font-mono text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${activeTab === "plans" ? "border-accent text-accent bg-bg" : "border-transparent text-subtext hover:text-text"}`}
             >
               <Sparkles className="w-4 h-4" /> PLANS
+            </button>
+            <button 
+              id="tab-documentation"
+              onClick={() => setActiveTab("documentation")}
+              className={`px-6 py-4 font-mono text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${activeTab === "documentation" ? "border-accent text-accent bg-bg" : "border-transparent text-subtext hover:text-text"}`}
+            >
+              <FileText className="w-4 h-4" /> DOCUMENTATION
             </button>
 
           </div>
@@ -1710,6 +1720,259 @@ export default function App() {
           )}
 
         </div>
+
+          {/* VIEW D: API DOCUMENTATION */}
+          {activeTab === "documentation" && (
+            <div className="flex-1 overflow-y-auto p-6 lg:p-10">
+              <div className="max-w-4xl mx-auto space-y-10">
+
+                {/* HEADER */}
+                <div>
+                  <h2 className="text-3xl font-black tracking-tight uppercase mb-2">API Documentation</h2>
+                  <p className="text-subtext font-mono text-sm">
+                    Base URL: <span className="text-accent">http://localhost:3000</span> &nbsp;|&nbsp; 
+                    Auth: <span className="text-accent">Basic Authentication</span> (Client ID / Client Secret)
+                  </p>
+                </div>
+
+                {/* SECTION HELPER */}
+                {[
+                  {
+                    section: "Authentication",
+                    endpoints: [
+                      {
+                        method: "POST", path: "/api/v1/auth/signup", 
+                        description: "Register a new user account.",
+                        request: `{
+  "email": "user@example.com",
+  "password": "securePassword123",
+  "fullName": "John Doe"
+}`,
+                        response: `{
+  "status": "REGISTERED",
+  "message": "Verification email sent to user@example.com"
+}`
+                      },
+                      {
+                        method: "POST", path: "/api/v1/auth/verify",
+                        description: "Verify email with the code received via email.",
+                        request: `{
+  "email": "user@example.com",
+  "code": "ABC123"
+}`,
+                        response: `{
+  "status": "VERIFIED",
+  "message": "Email verified successfully"
+}`
+                      },
+                      {
+                        method: "POST", path: "/api/v1/auth/login",
+                        description: "Authenticate and receive a session token.",
+                        request: `{
+  "email": "user@example.com",
+  "password": "securePassword123"
+}`,
+                        response: `{
+  "token": "session-jwt-token",
+  "email": "user@example.com",
+  "plan": "free",
+  "planLimitMb": 30,
+  "planPrice": 0,
+  "storageUsedKb": 0,
+  "customPlanPending": false
+}`
+                      },
+                      {
+                        method: "GET", path: "/api/v1/auth/me",
+                        description: "Get current authenticated user profile.",
+                        request: "(no body — requires session cookie)",
+                        response: `{
+  "email": "user@example.com",
+  "fullName": "John Doe",
+  "plan": "free",
+  "planLimitMb": 30,
+  "planPrice": 0,
+  "storageUsedKb": 0,
+  "customPlanPending": false
+}`
+                      },
+                      {
+                        method: "POST", path: "/api/v1/auth/logout",
+                        description: "Destroy the current session.",
+                        request: "(no body - requires session cookie)",
+                        response: `{
+  "message": "Logged out successfully"
+}`
+                      }
+                    ]
+                  },
+                  {
+                    section: "Subscription Plans",
+                    endpoints: [
+                      {
+                        method: "GET", path: "/api/v1/plans",
+                        description: "List all available subscription plans.",
+                        request: "(no auth required)",
+                        response: `[
+  { "id": "free",  "name": "Free",         "price": 0,     "storageMb": 30,  "description": "30 MB storage" },
+  { "id": "base",  "name": "Base",         "price": 5.99,  "storageMb": 5120, "description": "5 GB storage" },
+  { "id": "pro",   "name": "Professional", "price": 20,    "storageMb": 20480, "description": "20 GB storage" },
+  { "id": "custom","name": "Custom",       "price": 0,     "storageMb": 0,    "description": "Contact us" }
+]`
+                      },
+                      {
+                        method: "POST", path: "/api/v1/plans/assign",
+                        description: "Assign a plan to a user by email (used after verification).",
+                        request: `{
+  "email": "user@example.com",
+  "planId": "pro"
+}`,
+                        response: `{
+  "planId": "pro",
+  "requiresPayment": true,
+  "diffCents": 2000,
+  "message": "Professional plan selected. Payment required."
+}`
+                      },
+                      {
+                        method: "POST", path: "/api/v1/plans/select",
+                        description: "Change plan for the currently logged-in user (upgrade/downgrade).",
+                        request: `{
+  "planId": "base"
+}`,
+                        response: `{
+  "planId": "base",
+  "action": "UPGRADE_REQUIRED",
+  "diffCents": 599,
+  "message": "Upgrade to Base plan. Pay €5.99."
+}`
+                      },
+                      {
+                        method: "POST", path: "/api/v1/plans/create-checkout",
+                        description: "Create a Stripe Checkout session for payment.",
+                        request: `{
+  "planId": "pro",
+  "diffCents": 2000
+}`,
+                        response: `{
+  "url": "https://checkout.stripe.com/pay/cs_test_..."
+}`
+                      },
+                      {
+                        method: "GET", path: "/api/v1/plans/checkout-success",
+                        description: "Stripe redirect handler (shows success HTML page).",
+                        request: "?session_id=cs_test_... (query param)",
+                        response: "(HTML page with confirmation)"
+                      },
+                      {
+                        method: "POST", path: "/api/v1/plans/custom-request",
+                        description: "Submit a custom plan request (sends email to admin).",
+                        request: `{
+  "email": "user@example.com",
+  "message": "I need 100 GB storage for my business."
+}`,
+                        response: `{
+  "message": "Custom plan request sent. We'll contact you soon."
+}`
+                      }
+                    ]
+                  },
+                  {
+                    section: "Storage",
+                    endpoints: [
+                      {
+                        method: "POST", path: "/api/v1/storage/upload",
+                        description: "Upload a file to the bucket. Limited by plan storage quota.",
+                        request: "multipart/form-data — file field: \"file\"",
+                        response: `{
+  "id": "file-uuid",
+  "fileName": "photo.jpg",
+  "contentType": "image/jpeg",
+  "sizeKb": 2048,
+  "userId": 1,
+  "uploadedAt": "2026-07-03T12:00:00Z"
+}`
+                      },
+                      {
+                        method: "GET", path: "/api/v1/storage/files",
+                        description: "List all files owned by the authenticated user.",
+                        request: "(no body — requires Basic auth)",
+                        response: `[
+  {
+    "id": "file-uuid",
+    "fileName": "photo.jpg",
+    "contentType": "image/jpeg",
+    "sizeKb": 2048,
+    "userId": 1,
+    "uploadedAt": "2026-07-03T12:00:00Z"
+  }
+]`
+                      },
+                      {
+                        method: "GET", path: "/api/v1/storage/files/{id}",
+                        description: "Download a specific file by its UUID.",
+                        request: "(no body — requires Basic auth)",
+                        response: "(binary file stream — Content-Type: original mime type)"
+                      },
+                      {
+                        method: "DELETE", path: "/api/v1/storage/files/{id}",
+                        description: "Delete a file. Frees up storage quota.",
+                        request: "(no body — requires Basic auth)",
+                        response: `{
+  "message": "File deleted successfully"
+}`
+                      }
+                    ]
+                  }
+                ].map((group) => (
+                  <div key={group.section}>
+                    <h3 className="text-lg font-bold uppercase tracking-wider text-accent border-b border-line pb-2 mb-6">
+                      {group.section}
+                    </h3>
+                    <div className="space-y-6">
+                      {group.endpoints.map((ep, i) => (
+                        <div key={i} className="bg-[#0c0c0c] border border-line rounded-lg overflow-hidden">
+                          {/* Endpoint Header */}
+                          <div className="flex items-center gap-3 px-5 py-3 border-b border-line bg-panel/50">
+                            <span className={`font-mono text-xs font-bold px-2.5 py-1 rounded ${
+                              ep.method === "GET" ? "bg-green-900/30 text-green-400" :
+                              ep.method === "POST" ? "bg-blue-900/30 text-blue-400" :
+                              ep.method === "PUT" ? "bg-orange-900/30 text-orange-400" :
+                              "bg-red-900/30 text-red-400"
+                            }`}>
+                              {ep.method}
+                            </span>
+                            <span className="font-mono text-sm text-text font-semibold">{ep.path}</span>
+                            <span className="text-subtext text-xs ml-auto">{ep.description}</span>
+                          </div>
+                          {/* Request */}
+                          <div className="px-5 py-3 border-b border-line/50">
+                            <div className="text-[10px] text-subtext font-mono uppercase tracking-wider mb-1">Request</div>
+                            <pre className="text-xs text-text font-mono whitespace-pre-wrap break-all">{ep.request}</pre>
+                          </div>
+                          {/* Response */}
+                          <div className="px-5 py-3">
+                            <div className="text-[10px] text-subtext font-mono uppercase tracking-wider mb-1">Response</div>
+                            <pre className="text-xs text-green-300/80 font-mono whitespace-pre-wrap break-all">{ep.response}</pre>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                {/* FOOTER NOTE */}
+                <div className="border border-line rounded-lg p-5 bg-panel/30">
+                  <p className="text-xs text-subtext font-mono">
+                    <span className="text-accent font-bold">Authentication:</span> Storage endpoints use Basic Auth 
+                    with <code className="text-text">Client ID</code> as username and <code className="text-text">Client Secret</code> 
+                    as password. Session endpoints use a JWT cookie obtained from <code className="text-text">/api/v1/auth/login</code>.
+                  </p>
+                </div>
+
+              </div>
+            </div>
+          )}
 
         {/* 4. FOOTER DYNAMIC HTTP REQUEST CONSOLE LOGS */}
         <footer className="border-t border-line bg-[#040404] p-6 z-10 font-mono">
