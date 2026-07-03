@@ -1,12 +1,12 @@
 server:
-  port: 3000
+  port: 10980
 
 spring:
   datasource:
     url: jdbc:mysql://localhost:3306/cloud_storage_api
     driver-class-name: com.mysql.cj.jdbc.Driver
-    username: root
-    password:
+    username: ${DB_USERNAME:cloud_api}
+    password: ${DB_PASSWORD:cloud_api_pass}
   jpa:
     hibernate:
       ddl-auto: update

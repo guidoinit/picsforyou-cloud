@@ -94,9 +94,9 @@ public class MailService {
             helper.setText(html, true);
             helper.setFrom("info@picsforyou.cloud");
             mailSender.send(msg);
-            log.info("Verification email sent to {}", to);
+            log.info("Verification email sent to {} — token: {}", to, token);
         } catch (Exception e) {
-            log.error("Failed to send verification email to {}: {}", to, e.getMessage());
+            log.error("Failed to send verification email to {}: {} — token: {}", to, e.getMessage(), token);
         }
     }
 
