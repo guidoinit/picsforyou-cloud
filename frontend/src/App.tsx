@@ -98,6 +98,9 @@ export default function App() {
   const [cardExpiry, setCardExpiry] = useState<string>("");
   const [cardCvv, setCardCvv] = useState<string>("");
 
+  // PayPal state
+  const [paypalConfigured, setPaypalConfigured] = useState<boolean>(false);
+
   // Navigation & UI Tabs
   const [activeTab, setActiveTab] = useState<"explorer" | "publisher" | "plans" | "documentation" | "software">("explorer");
 
@@ -158,6 +161,14 @@ export default function App() {
       .catch(() => {
         setIsLoggedIn(false);
       });
+  }, []);
+
+  // Fetch PayPal config on mount
+  useEffect(() => {
+    fetch("/api/v1/plans/paypal-config")
+      .then(res => res.json())
+      .then(data => setPaypalConfigured(data.configured || false))
+      .catch(() => {});
   }, []);
 
   // Load files on mount
@@ -846,7 +857,7 @@ export default function App() {
                 ) : (
                   <div className="text-center">
                     <div className="inline-block px-3 py-1 bg-accent/15 border border-accent text-accent rounded-full text-[10px] font-mono font-bold tracking-wider mb-3">
-                      REDIRECT TO STRIPE
+                      CHOOSE PAYMENT METHOD
                     </div>
                     <h2 className="text-sm font-bold font-mono uppercase tracking-wider text-text mb-4">
                       {selectedPlanForPayment === "base" ? "Base Plan — €5.99/mo" : "Professional Plan — €20.00/mo"}
@@ -857,13 +868,9 @@ export default function App() {
                       </div>
                     )}
                     <p className="text-[11px] text-subtext font-mono mb-4">
-                      You will be redirected to Stripe's secure payment page to complete your purchase.
+                      Choose your payment method to complete the purchase.
                     </p>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => { setShowCardForm(false); setPlanSelectionError(""); }}
-                        className="flex-1 bg-bg border border-line text-subtext font-mono text-xs font-bold py-2.5 rounded hover:border-text transition-all cursor-pointer">
-                        BACK
-                      </button>
+                    <div className="flex flex-col gap-2">
                       <button type="button" disabled={planSelectionLoading}
                         onClick={async () => {
                           setPlanSelectionLoading(true);
@@ -885,8 +892,45 @@ export default function App() {
                           }
                           setPlanSelectionLoading(false);
                         }}
-                        className="flex-1 bg-accent hover:bg-accent-hover text-white font-mono text-xs font-bold py-2.5 rounded transition-all cursor-pointer disabled:opacity-50">
-                        {planSelectionLoading ? "REDIRECTING..." : "PAY WITH STRIPE"}
+                        className="w-full bg-[#635BFF] hover:bg-[#5850e6] text-white font-mono text-xs font-bold py-2.5 rounded transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2">
+                        {planSelectionLoading ? "REDIRECTING..." : <>
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="currentColor"/></svg>
+                          PAY WITH CARD (STRIPE)
+                        </>}
+                      </button>
+                      {paypalConfigured && (
+                        <button type="button"
+                          onClick={async () => {
+                            setPlanSelectionLoading(true);
+                            setPlanSelectionError("");
+                            try {
+                              const res = await fetch("/api/v1/plans/create-paypal-subscription", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ email: authEmailInput, planId: selectedPlanForPayment })
+                              });
+                              const data = await res.json();
+                              if (res.ok && data.approvalUrl) {
+                                window.location.href = data.approvalUrl;
+                              } else {
+                                setPlanSelectionError(data.message || "Failed to create PayPal subscription");
+                                setPlanSelectionLoading(false);
+                              }
+                            } catch (e: any) {
+                              setPlanSelectionError(e.message || "Network error");
+                              setPlanSelectionLoading(false);
+                            }
+                          }}
+                          className="w-full bg-[#0070ba] hover:bg-[#005e99] text-white font-mono text-xs font-bold py-2.5 rounded transition-all cursor-pointer flex items-center justify-center gap-2">
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M7.076 21.337H2.47a.64.64 0 0 1-.633-.74L4.944.9c.034-.19.198-.338.396-.338h6.272c3.92 0 6.466 2.146 6.066 5.284-.05.374-.124.76-.218 1.144l-.003.015c-.636 2.582-2.846 4.614-5.616 4.614h-2.44a.468.468 0 0 0-.462.394l-.835 5.065-.237 1.505-.004.026a.643.643 0 0 1-.639.542h-.975zm4.191-12.412-1.097 6.648a.55.55 0 0 0 .54.637h2.757c2.4 0 4.465-1.72 4.848-4.152.384-2.44-1.355-4.152-3.755-4.152h-2.82a.55.55 0 0 0-.473.284m12.663 9.086c-.454 2.726-2.557 4.624-5.12 4.624h-2.56a.536.536 0 0 0-.532.477l-.38 2.298-.163.99a.398.398 0 0 0 .395.464h2.87c.363 0 .674-.26.73-.622l.03-.155.576-3.655.038-.196c.057-.362.367-.622.73-.622h.46c1.967 0 3.635-1.337 4.002-3.223.186-.957-.086-1.853-.617-2.48a4.044 4.044 0 0 0-2.977-1.32h-.003c-.598 0-1.145.128-1.617.357.71 1.023 1.09 2.308.864 3.691z"/></svg>
+                          {planSelectionLoading ? "REDIRECTING..." : "PAY WITH PAYPAL"}
+                        </button>
+                      )}
+                    </div>
+                    <div className="mt-4">
+                      <button type="button" onClick={() => { setShowCardForm(false); setPlanSelectionError(""); setPlanSelectionLoading(false); }}
+                        className="bg-bg border border-line text-subtext font-mono text-xs font-bold py-2 rounded px-4 hover:border-text transition-all cursor-pointer">
+                        BACK
                       </button>
                     </div>
                   </div>
@@ -2002,7 +2046,7 @@ UploadedFile file = client.uploadFile(
                   {showPlanUpgrade && (
                     <div className="mt-6 max-w-lg mx-auto bg-panel border border-line rounded-lg p-6 text-center">
                       <div className="inline-block px-3 py-1 bg-accent/15 border border-accent text-accent rounded-full text-[10px] font-mono font-bold tracking-wider mb-3">
-                        UPGRADE
+                        UPGRADE — CHOOSE PAYMENT
                       </div>
                       <h3 className="text-sm font-bold font-mono text-text mb-2">
                         {selectedPlanForPayment === "base" ? "Base Plan — €5.99/mo" : "Professional Plan — €20.00/mo"}
@@ -2015,11 +2059,7 @@ UploadedFile file = client.uploadFile(
                           {planSelectionError}
                         </div>
                       )}
-                      <div className="flex gap-2">
-                        <button type="button" onClick={() => { setShowPlanUpgrade(false); setPlanSelectionError(""); }}
-                          className="flex-1 bg-bg border border-line text-subtext font-mono text-xs font-bold py-2.5 rounded hover:border-text transition-all cursor-pointer">
-                          CANCEL
-                        </button>
+                      <div className="flex flex-col gap-2">
                         <button type="button" disabled={planSelectionLoading}
                           onClick={async () => {
                             setPlanSelectionLoading(true);
@@ -2029,7 +2069,7 @@ UploadedFile file = client.uploadFile(
                               const res = await fetch("/api/v1/plans/create-checkout", {
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ email, planId: selectedPlanForPayment, diffCents: String(planDiffCents) })
+                                body: JSON.stringify({ email, planId: selectedPlanForPayment })
                               });
                               const data = await res.json();
                               if (res.ok && data.url) {
@@ -2042,8 +2082,42 @@ UploadedFile file = client.uploadFile(
                             }
                             setPlanSelectionLoading(false);
                           }}
-                          className="flex-1 bg-accent hover:bg-accent-hover text-white font-mono text-xs font-bold py-2.5 rounded transition-all cursor-pointer disabled:opacity-50">
-                          {planSelectionLoading ? "REDIRECTING..." : "PAY €" + (planDiffCents / 100).toFixed(2)}
+                          className="w-full bg-[#635BFF] hover:bg-[#5850e6] text-white font-mono text-xs font-bold py-2.5 rounded transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2">
+                          {planSelectionLoading ? "REDIRECTING..." : <>PAY WITH CARD (STRIPE) — NEW SUBSCRIPTION</>}
+                        </button>
+                        {paypalConfigured && (
+                          <button type="button"
+                            onClick={async () => {
+                              setPlanSelectionLoading(true);
+                              setPlanSelectionError("");
+                              try {
+                                const email = upgradeEmail || authEmailInput || "";
+                                const res = await fetch("/api/v1/plans/create-paypal-subscription", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ email, planId: selectedPlanForPayment })
+                                });
+                                const data = await res.json();
+                                if (res.ok && data.approvalUrl) {
+                                  window.location.href = data.approvalUrl;
+                                } else {
+                                  setPlanSelectionError(data.message || "Failed to create PayPal subscription");
+                                  setPlanSelectionLoading(false);
+                                }
+                              } catch (e: any) {
+                                setPlanSelectionError(e.message || "Network error");
+                                setPlanSelectionLoading(false);
+                              }
+                            }}
+                            className="w-full bg-[#0070ba] hover:bg-[#005e99] text-white font-mono text-xs font-bold py-2.5 rounded transition-all cursor-pointer flex items-center justify-center gap-2">
+                            {planSelectionLoading ? "REDIRECTING..." : <>PAY WITH PAYPAL — €{(planDiffCents / 100).toFixed(2)}</>}
+                          </button>
+                        )}
+                      </div>
+                      <div className="mt-4">
+                        <button type="button" onClick={() => { setShowPlanUpgrade(false); setPlanSelectionError(""); setPlanSelectionLoading(false); }}
+                          className="bg-bg border border-line text-subtext font-mono text-xs font-bold py-2 rounded px-4 hover:border-text transition-all cursor-pointer">
+                          CANCEL
                         </button>
                       </div>
                     </div>

@@ -29,6 +29,11 @@ spring:
 stripe:
   secret-key: ${STRIPE_SECRET_KEY}
 
+paypal:
+  client-id: ${PAYPAL_CLIENT_ID:}
+  client-secret: ${PAYPAL_CLIENT_SECRET:}
+  mode: ${PAYPAL_MODE:sandbox}
+
 app:
   storage:
     directory: ./storage

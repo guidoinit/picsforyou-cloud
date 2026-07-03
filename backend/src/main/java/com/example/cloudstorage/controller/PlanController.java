@@ -7,6 +7,7 @@ import com.example.cloudstorage.repository.AppUserRepository;
 import com.example.cloudstorage.repository.SubscriptionPlanRepository;
 import com.example.cloudstorage.repository.UserSessionRepository;
 import com.example.cloudstorage.service.MailService;
+import com.example.cloudstorage.service.PayPalPaymentService;
 import com.example.cloudstorage.service.StripePaymentService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/api/v1/plans")
@@ -24,21 +26,26 @@ public class PlanController {
     private final AppUserRepository appUserRepository;
     private final UserSessionRepository userSessionRepository;
     private final StripePaymentService stripePaymentService;
+    private final PayPalPaymentService payPalPaymentService;
     private final MailService mailService;
 
     private static final long FREE_PRICE_CENTS = 0;
     private static final long BASE_PRICE_CENTS = 599;
     private static final long PRO_PRICE_CENTS = 2000;
 
+    private final ConcurrentHashMap<String, Map<String, String>> pendingPayPalAgreements = new ConcurrentHashMap<>();
+
     public PlanController(SubscriptionPlanRepository subscriptionPlanRepository,
                           AppUserRepository appUserRepository,
                           UserSessionRepository userSessionRepository,
                           StripePaymentService stripePaymentService,
+                          PayPalPaymentService payPalPaymentService,
                           MailService mailService) {
         this.subscriptionPlanRepository = subscriptionPlanRepository;
         this.appUserRepository = appUserRepository;
         this.userSessionRepository = userSessionRepository;
         this.stripePaymentService = stripePaymentService;
+        this.payPalPaymentService = payPalPaymentService;
         this.mailService = mailService;
     }
 
@@ -73,8 +80,8 @@ public class PlanController {
                 "error", "Bad Request", "message", "Invalid planId"));
         }
 
-        UserSession session = sessionOpt.get();
-        Optional<AppUser> userOpt = appUserRepository.findById(session.getUserId());
+        UserSession userSession = sessionOpt.get();
+        Optional<AppUser> userOpt = appUserRepository.findById(userSession.getUserId());
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of(
                 "error", "Not Found", "message", "User not found"));
@@ -93,21 +100,6 @@ public class PlanController {
         long currentPrice = getPlanPriceCents(user.getSubscriptionPlanId());
         long targetPrice = getPlanPriceCents(planId);
 
-        // Free/Custom → no payment or refund needed
-        if ((planId.equals("free") || planId.equals("custom") || currentPrice == targetPrice)
-            && (user.getStripePaymentIntentId() == null || user.getStripePaymentIntentId().isBlank())) {
-            // Never paid and going to free/custom/same price → just assign
-            user.setSubscriptionPlanId(planId);
-            appUserRepository.save(user);
-            return ResponseEntity.ok(Map.of(
-                "status", "SUCCESS",
-                "message", "Plan changed to " + targetPlan.getName(),
-                "plan", planId,
-                "planLimitMb", targetPlan.getStorageLimitMb(),
-                "planPrice", targetPlan.getPrice()
-            ));
-        }
-
         // Same plan → no change
         if (user.getSubscriptionPlanId().equals(planId)) {
             return ResponseEntity.ok(Map.of(
@@ -119,43 +111,35 @@ public class PlanController {
             ));
         }
 
-        // Downgrade (going from paid to cheaper or free)
-        if (targetPrice < currentPrice) {
-            // If paid → free or custom, no refund
-            if (planId.equals("free") || planId.equals("custom")) {
-                user.setSubscriptionPlanId(planId);
-                user.setStripeAmountPaid(0L);
-                user.setStripePaymentIntentId(null);
-                appUserRepository.save(user);
-                return ResponseEntity.ok(Map.of(
-                    "status", "SUCCESS",
-                    "message", "Plan downgraded to " + targetPlan.getName(),
-                    "plan", planId,
-                    "planLimitMb", targetPlan.getStorageLimitMb(),
-                    "planPrice", targetPlan.getPrice()
-                ));
-            }
-
-            // Paid → cheaper paid: issue refund for difference
-            long diffCents = currentPrice - targetPrice;
-            String pi = user.getStripePaymentIntentId();
-            if (pi == null || pi.isBlank()) {
-                return ResponseEntity.badRequest().body(Map.of(
-                    "error", "Bad Request", "message", "No payment record found for refund"));
-            }
-            try {
-                stripePaymentService.refundPayment(pi, diffCents);
-            } catch (Exception e) {
-                return ResponseEntity.status(500).body(Map.of(
-                    "error", "Refund Error", "message", e.getMessage()));
-            }
-
+        // Going to free/custom → cancel any active subscription
+        if (planId.equals("free") || planId.equals("custom")) {
+            cancelExistingSubscription(user);
             user.setSubscriptionPlanId(planId);
-            user.setStripeAmountPaid(targetPrice);
+            user.setStripeAmountPaid(0L);
+            user.setStripePaymentIntentId(null);
+            user.setPaypalAmountPaid(0L);
+            user.setPaypalOrderId(null);
+            user.setPaypalCaptureId(null);
+            user.setStripeSubscriptionId(null);
+            user.setPaypalSubscriptionId(null);
             appUserRepository.save(user);
             return ResponseEntity.ok(Map.of(
                 "status", "SUCCESS",
-                "message", "Plan downgraded to " + targetPlan.getName() + ". Refund of €" + String.format(Locale.US, "%.2f", diffCents / 100.0) + " initiated.",
+                "message", "Plan changed to " + targetPlan.getName(),
+                "plan", planId,
+                "planLimitMb", targetPlan.getStorageLimitMb(),
+                "planPrice", targetPlan.getPrice()
+            ));
+        }
+
+        // Downgrade (paid → cheaper paid)
+        if (targetPrice < currentPrice) {
+            cancelExistingSubscription(user);
+            user.setSubscriptionPlanId(planId);
+            appUserRepository.save(user);
+            return ResponseEntity.ok(Map.of(
+                "status", "SUCCESS",
+                "message", "Plan downgraded to " + targetPlan.getName() + ". Your old subscription has been cancelled.",
                 "plan", planId,
                 "planLimitMb", targetPlan.getStorageLimitMb(),
                 "planPrice", targetPlan.getPrice()
@@ -164,25 +148,23 @@ public class PlanController {
 
         // Upgrade (going from cheaper to more expensive)
         if (targetPrice > currentPrice) {
-            long diffCents = targetPrice - currentPrice;
             return ResponseEntity.ok(Map.of(
                 "status", "UPGRADE_REQUIRED",
-                "message", "Pay the difference of €" + String.format(Locale.US, "%.2f", diffCents / 100.0) + " to upgrade to " + targetPlan.getName(),
+                "message", "Upgrade to " + targetPlan.getName() + " (€" + String.format(Locale.US, "%.2f", targetPrice / 100.0) + "/month)",
                 "plan", planId,
-                "diffCents", diffCents,
                 "email", user.getEmail()
             ));
         }
 
+        // Fallback: just assign
         user.setSubscriptionPlanId(planId);
         appUserRepository.save(user);
-        SubscriptionPlan plan = planOpt.get();
         return ResponseEntity.ok(Map.of(
             "status", "SUCCESS",
-            "message", "Plan upgraded to " + plan.getName(),
+            "message", "Plan changed to " + targetPlan.getName(),
             "plan", planId,
-            "planLimitMb", plan.getStorageLimitMb(),
-            "planPrice", plan.getPrice()
+            "planLimitMb", targetPlan.getStorageLimitMb(),
+            "planPrice", targetPlan.getPrice()
         ));
     }
 
@@ -225,7 +207,6 @@ public class PlanController {
     public ResponseEntity<?> createCheckout(@RequestBody Map<String, String> body) {
         String email = body.get("email");
         String planId = body.get("planId");
-        String diffCentsStr = body.get("diffCents");
 
         if (email == null || email.isBlank() || planId == null || planId.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of(
@@ -233,13 +214,7 @@ public class PlanController {
         }
 
         try {
-            Map<String, Object> result;
-            if (diffCentsStr != null && !diffCentsStr.isBlank()) {
-                long diffCents = Long.parseLong(diffCentsStr);
-                result = stripePaymentService.createCheckoutSession(email, planId, diffCents);
-            } else {
-                result = stripePaymentService.createCheckoutSession(email, planId);
-            }
+            Map<String, Object> result = stripePaymentService.createSubscriptionSession(email, planId);
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of(
@@ -262,48 +237,47 @@ public class PlanController {
         SubscriptionPlan plan = planOpt.get();
 
         try {
-            Map<String, Object> verification = stripePaymentService.verifyCheckoutSession(sessionId);
-            boolean paid = (boolean) verification.get("paid");
-            if (!paid) {
+            Map<String, Object> verification = stripePaymentService.verifySubscriptionSession(sessionId);
+            boolean active = (boolean) verification.get("active");
+            if (!active) {
                 String html = """
-                    <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Payment Failed</title>
+                    <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Subscription Failed</title>
                     <style>body{background:#0a0a0a;color:#eee;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;}
                     .box{background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:40px;text-align:center;max-width:480px;}
                     h1{color:#FF3E00;}p{color:#999;}</style></head>
-                    <body><div class="box"><h1>\u2715 Payment Failed</h1><p>Your payment was not completed. Please try again.</p>
+                    <body><div class="box"><h1>\u2715 Subscription Failed</h1><p>Your subscription was not completed. Please try again.</p>
                     <a href="http://localhost:5173" style="color:#FF3E00;">\u2190 Back to picsforyou.cloud</a></div></body></html>
                     """;
                 return ResponseEntity.ok().header("Content-Type", "text/html").body(html);
             }
 
-            String paymentIntentId = (String) verification.get("paymentIntentId");
+            String subscriptionId = (String) verification.get("subscriptionId");
 
+            // Cancel any existing subscription before assigning new one
             Optional<AppUser> userOpt = appUserRepository.findByEmail(email);
-            if (userOpt.isEmpty()) {
-                return ResponseEntity.status(404).body(Map.of(
-                    "error", "Not Found", "message", "User not found"));
+            if (userOpt.isPresent()) {
+                AppUser user = userOpt.get();
+                cancelExistingSubscription(user);
+                user.setSubscriptionPlanId(planId);
+                user.setStripeSubscriptionId(subscriptionId);
+                user.setStripeAmountPaid(getPlanPriceCents(planId));
+                appUserRepository.save(user);
             }
-
-            AppUser user = userOpt.get();
-            user.setSubscriptionPlanId(planId);
-            user.setStripePaymentIntentId(paymentIntentId);
-            user.setStripeAmountPaid(getPlanPriceCents(planId));
-            appUserRepository.save(user);
 
             String planName = plan.getName();
             String html = """
-                <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Payment Successful!</title>
+                <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Subscription Active!</title>
                 <style>body{background:#0a0a0a;color:#eee;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;}
                 .box{background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:40px;text-align:center;max-width:480px;}
                 h1{color:#FF3E00;}p{color:#999;line-height:1.6;}.btn{display:inline-block;margin-top:20px;padding:12px 24px;
                 background:#FF3E00;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;font-size:13px;}</style></head>
                 <body><div class="box">
                 <div style="font-size:48px;margin-bottom:16px;">\u2713</div>
-                <h1>Payment Successful!</h1>
-                <p>Your <strong style="color:#eee;">%s</strong> plan is now active.<br>Login to start using the Cloud Storage API.</p>
+                <h1>Subscription Active!</h1>
+                <p>Your <strong style="color:#eee;">%s</strong> plan is now active.<br>You will be billed \u20ac%.2f monthly.<br>Login to start using the Cloud Storage API.</p>
                 <a class="btn" href="http://localhost:5173">LOGIN TO PICKSFORYOU.CLOUD</a>
                 </div></body></html>
-                """.formatted(planName);
+                """.formatted(planName, plan.getPrice());
             return ResponseEntity.ok().header("Content-Type", "text/html").body(html);
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of(
@@ -350,8 +324,8 @@ public class PlanController {
         String currentPlan = user.getSubscriptionPlanId();
         String currentPlanName = switch (currentPlan) {
             case "free" -> "Free";
-            case "base" -> "Base (€5.99)";
-            case "professional" -> "Professional (€20.00)";
+            case "base" -> "Base (\u20ac5.99)";
+            case "professional" -> "Professional (\u20ac20.00)";
             default -> currentPlan;
         };
 
@@ -365,6 +339,138 @@ public class PlanController {
             "message", "Custom plan request sent. We will contact you soon.",
             "customPlanPending", true
         ));
+    }
+
+    @GetMapping("/paypal-config")
+    public ResponseEntity<?> payPalConfig() {
+        return ResponseEntity.ok(Map.of(
+            "clientId", payPalPaymentService.isConfigured()
+                ? payPalPaymentService.getClientId() : "",
+            "configured", payPalPaymentService.isConfigured()
+        ));
+    }
+
+    @PostMapping("/create-paypal-subscription")
+    public ResponseEntity<?> createPayPalSubscription(@RequestBody Map<String, String> body) {
+        if (!payPalPaymentService.isConfigured()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "PayPal not configured", "message", "PayPal is not configured"));
+        }
+
+        String email = body.get("email");
+        String planId = body.get("planId");
+
+        if (email == null || email.isBlank() || planId == null || planId.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Bad Request", "message", "email and planId are required"));
+        }
+
+        try {
+            long amountCents = getPlanPriceCents(planId);
+            Map<String, Object> result = payPalPaymentService.createSubscription(email, planId, amountCents);
+            String token = (String) result.get("agreementId");
+            if (token != null) {
+                pendingPayPalAgreements.put(token, Map.of("email", email, "planId", planId));
+            }
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of(
+                "error", "PayPal Error", "message", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/paypal-subscription-success")
+    public ResponseEntity<?> payPalSubscriptionSuccess(@RequestParam("token") String token) {
+        Map<String, String> pending = pendingPayPalAgreements.remove(token);
+        if (pending == null) {
+            String html = """
+                <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Subscription Failed</title>
+                <style>body{background:#0a0a0a;color:#eee;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;}
+                .box{background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:40px;text-align:center;max-width:480px;}
+                h1{color:#FF3E00;}p{color:#999;}</style></head>
+                <body><div class="box"><h1>\u2715 Subscription Failed</h1><p>Your PayPal subscription was not completed (session expired).</p>
+                <a href="http://localhost:5173" style="color:#FF3E00;">\u2190 Back to picsforyou.cloud</a></div></body></html>
+                """;
+            return ResponseEntity.ok().header("Content-Type", "text/html").body(html);
+        }
+
+        String email = pending.get("email");
+        String planId = pending.get("planId");
+
+        var planOpt = subscriptionPlanRepository.findById(planId);
+        if (planOpt.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "Bad Request", "message", "Invalid planId"));
+        }
+
+        SubscriptionPlan plan = planOpt.get();
+
+        try {
+            Map<String, Object> executionResult = payPalPaymentService.executeAgreement(token);
+            String status = (String) executionResult.get("status");
+            String agreementId = (String) executionResult.get("agreementId");
+
+            if (!"Active".equalsIgnoreCase(status) && !"Pending".equalsIgnoreCase(status)) {
+                String html = """
+                    <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Subscription Failed</title>
+                    <style>body{background:#0a0a0a;color:#eee;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;}
+                    .box{background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:40px;text-align:center;max-width:480px;}
+                    h1{color:#FF3E00;}p{color:#999;}</style></head>
+                    <body><div class="box"><h1>\u2715 Subscription Failed</h1><p>Your PayPal subscription was not completed.</p>
+                    <a href="http://localhost:5173" style="color:#FF3E00;">\u2190 Back to picsforyou.cloud</a></div></body></html>
+                    """;
+                return ResponseEntity.ok().header("Content-Type", "text/html").body(html);
+            }
+
+            // Cancel existing subscription and assign new one
+            Optional<AppUser> userOpt = appUserRepository.findByEmail(email);
+            if (userOpt.isPresent()) {
+                AppUser user = userOpt.get();
+                cancelExistingSubscription(user);
+                user.setSubscriptionPlanId(planId);
+                user.setPaypalSubscriptionId(agreementId);
+                user.setPaypalAmountPaid(getPlanPriceCents(planId));
+                appUserRepository.save(user);
+            }
+
+            String planName = plan.getName();
+            String html = """
+                <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Subscription Active!</title>
+                <style>body{background:#0a0a0a;color:#eee;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh;}
+                .box{background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:40px;text-align:center;max-width:480px;}
+                h1{color:#FF3E00;}p{color:#999;line-height:1.6;}.btn{display:inline-block;margin-top:20px;padding:12px 24px;
+                background:#FF3E00;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;font-size:13px;}</style></head>
+                <body><div class="box">
+                <div style="font-size:48px;margin-bottom:16px;">\u2713</div>
+                <h1>Subscription Active!</h1>
+                <p>Your <strong style="color:#eee;">%s</strong> plan is now active.<br>You will be billed \u20ac%.2f monthly via PayPal.<br>Login to start using the Cloud Storage API.</p>
+                <a class="btn" href="http://localhost:5173">LOGIN TO PICKSFORYOU.CLOUD</a>
+                </div></body></html>
+                """.formatted(planName, plan.getPrice());
+            return ResponseEntity.ok().header("Content-Type", "text/html").body(html);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of(
+                "error", "PayPal Error", "message", e.getMessage()));
+        }
+    }
+
+    private void cancelExistingSubscription(AppUser user) {
+        try {
+            if (user.getStripeSubscriptionId() != null && !user.getStripeSubscriptionId().isBlank()) {
+                stripePaymentService.cancelSubscription(user.getStripeSubscriptionId());
+            }
+            if (user.getPaypalSubscriptionId() != null && !user.getPaypalSubscriptionId().isBlank()) {
+                payPalPaymentService.cancelSubscription(user.getPaypalSubscriptionId());
+            }
+        } catch (Exception e) {
+            // Log but don't block the flow
+            System.err.println("Failed to cancel existing subscription: " + e.getMessage());
+        }
+    }
+
+    private boolean hasPaid(AppUser user) {
+        return (user.getStripeSubscriptionId() != null && !user.getStripeSubscriptionId().isBlank())
+            || (user.getPaypalSubscriptionId() != null && !user.getPaypalSubscriptionId().isBlank());
     }
 
     private long getPlanPriceCents(String planId) {

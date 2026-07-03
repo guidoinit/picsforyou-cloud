@@ -56,6 +56,10 @@
             <artifactId>stripe-java</artifactId>
             <version>28.4.0</version>
         </dependency>
+        <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

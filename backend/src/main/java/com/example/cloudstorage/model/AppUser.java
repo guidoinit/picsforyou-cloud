@@ -46,6 +46,21 @@ public class AppUser {
     @Column
     private Long stripeAmountPaid; // in cents
 
+    @Column
+    private String paypalOrderId;
+
+    @Column
+    private String paypalCaptureId;
+
+    @Column
+    private Long paypalAmountPaid; // in cents
+
+    @Column
+    private String stripeSubscriptionId;
+
+    @Column
+    private String paypalSubscriptionId;
+
     @Column(nullable = false)
     private boolean customPlanPending;
 
@@ -87,6 +102,16 @@ public class AppUser {
     public void setStripePaymentIntentId(String stripePaymentIntentId) { this.stripePaymentIntentId = stripePaymentIntentId; }
     public Long getStripeAmountPaid() { return stripeAmountPaid; }
     public void setStripeAmountPaid(Long stripeAmountPaid) { this.stripeAmountPaid = stripeAmountPaid; }
+    public String getPaypalOrderId() { return paypalOrderId; }
+    public void setPaypalOrderId(String paypalOrderId) { this.paypalOrderId = paypalOrderId; }
+    public String getPaypalCaptureId() { return paypalCaptureId; }
+    public void setPaypalCaptureId(String paypalCaptureId) { this.paypalCaptureId = paypalCaptureId; }
+    public Long getPaypalAmountPaid() { return paypalAmountPaid; }
+    public void setPaypalAmountPaid(Long paypalAmountPaid) { this.paypalAmountPaid = paypalAmountPaid; }
+    public String getStripeSubscriptionId() { return stripeSubscriptionId; }
+    public void setStripeSubscriptionId(String stripeSubscriptionId) { this.stripeSubscriptionId = stripeSubscriptionId; }
+    public String getPaypalSubscriptionId() { return paypalSubscriptionId; }
+    public void setPaypalSubscriptionId(String paypalSubscriptionId) { this.paypalSubscriptionId = paypalSubscriptionId; }
     public boolean isCustomPlanPending() { return customPlanPending; }
     public void setCustomPlanPending(boolean customPlanPending) { this.customPlanPending = customPlanPending; }
 }
