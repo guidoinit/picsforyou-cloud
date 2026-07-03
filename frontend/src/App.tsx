@@ -99,7 +99,7 @@ export default function App() {
   const [cardCvv, setCardCvv] = useState<string>("");
 
   // Navigation & UI Tabs
-  const [activeTab, setActiveTab] = useState<"explorer" | "publisher" | "plans" | "documentation">("explorer");
+  const [activeTab, setActiveTab] = useState<"explorer" | "publisher" | "plans" | "documentation" | "software">("explorer");
 
   const [activeMethodIndex, setActiveMethodIndex] = useState<number>(0);
 
@@ -1165,7 +1165,7 @@ export default function App() {
             <div className="flex items-center gap-2 text-text">
               <span className="text-accent font-bold">&gt;</span>
               <span className="text-green-400 font-semibold">
-                {activeTab === "publisher" ? "POST" : activeTab === "plans" ? "GET" : activeTab === "documentation" ? "GET" : "GET"}
+                {activeTab === "publisher" ? "POST" : activeTab === "plans" ? "GET" : activeTab === "documentation" ? "GET" : activeTab === "software" ? "GET" : "GET"}
               </span>
               <span>
                 {activeTab === "publisher" 
@@ -1174,6 +1174,8 @@ export default function App() {
                   ? "/api/v1/plans"
                   : activeTab === "documentation"
                   ? "/api/v1/docs"
+                  : activeTab === "software"
+                  ? "/api/v1/software"
                   : "/api/v1/storage/files"
                 }
               </span>
@@ -1213,6 +1215,13 @@ export default function App() {
               className={`px-6 py-4 font-mono text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${activeTab === "plans" ? "border-accent text-accent bg-bg" : "border-transparent text-subtext hover:text-text"}`}
             >
               <Sparkles className="w-4 h-4" /> PLANS
+            </button>
+            <button 
+              id="tab-software"
+              onClick={() => setActiveTab("software")}
+              className={`px-6 py-4 font-mono text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${activeTab === "software" ? "border-accent text-accent bg-bg" : "border-transparent text-subtext hover:text-text"}`}
+            >
+              <ExternalLink className="w-4 h-4" /> SOFTWARE
             </button>
 
           </div>
@@ -1781,6 +1790,78 @@ export default function App() {
                   </div>
                 </div>
 
+              </div>
+            </div>
+          )}
+
+          {/* VIEW E: SOFTWARE SDK */}
+          {activeTab === "software" && (
+            <div className="flex-1 overflow-y-auto p-6 lg:p-10">
+              <div className="max-w-3xl mx-auto space-y-8">
+                <div>
+                  <h2 className="text-2xl font-black tracking-tight uppercase flex items-center gap-3">
+                    <ExternalLink className="w-6 h-6 text-accent" /> Java Client SDK
+                  </h2>
+                  <p className="text-subtext font-mono text-sm mt-2">
+                    Standalone Java library for the picsforyou.cloud REST API.
+                    Consume all endpoints — Auth, Plans, Storage — from any Java application.
+                  </p>
+                </div>
+
+                <div className="bg-[#0c0c0c] border border-line rounded-lg p-6">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-accent mb-3">Repository</h3>
+                  <a href="https://github.com/guidoinit/picsforyou-cloud-client"
+                     target="_blank"
+                     rel="noopener noreferrer"
+                     className="inline-flex items-center gap-2 bg-panel border border-line hover:border-accent/50 rounded-lg px-5 py-4 transition-all group w-full">
+                    <ExternalLink className="w-5 h-5 text-accent shrink-0" />
+                    <div>
+                      <div className="text-text font-bold text-sm group-hover:text-accent transition-colors">
+                        github.com/guidoinit/picsforyou-cloud-client
+                      </div>
+                      <div className="text-subtext text-xs font-mono mt-0.5">
+                        Java 21 · Maven · Jackson · SLF4J
+                      </div>
+                    </div>
+                  </a>
+                </div>
+
+                <div className="bg-[#0c0c0c] border border-line rounded-lg p-6">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-accent mb-3">Quick Start</h3>
+                  <pre className="text-xs text-text font-mono whitespace-pre-wrap leading-relaxed bg-bg border border-line rounded p-4 overflow-x-auto">{`PicsForYouCloudClient client = new PicsForYouCloudClient("http://localhost:3000");
+
+// Auth
+AuthResponse login = client.login("user@example.com", "mypassword");
+// → token, plan, storageUsedKb
+
+// Plans
+List<Plan> plans = client.listPlans();
+PlanSelectionResult result = client.selectPlan("base");
+
+// Storage (requires Bearer token)
+TokenResponse token = client.requestToken("client-id", "client-secret");
+UploadedFile file = client.uploadFile(
+    token.getAccessToken(), "photo.jpg",
+    "image/jpeg", 2048, base64Data);`}</pre>
+                </div>
+
+                <div className="bg-[#0c0c0c] border border-line rounded-lg p-6">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-accent mb-3">Maven Dependency</h3>
+                  <pre className="text-xs text-text font-mono whitespace-pre-wrap leading-relaxed bg-bg border border-line rounded p-4 overflow-x-auto">{`<dependency>
+    <groupId>com.picsforyou.cloud</groupId>
+    <artifactId>picsforyou-cloud-client</artifactId>
+    <version>1.0.0</version>
+</dependency>`}</pre>
+                </div>
+
+                <div className="border border-line rounded-lg p-5 bg-panel/30">
+                  <p className="text-xs text-subtext font-mono">
+                    <span className="text-accent font-bold">API Coverage:</span> signup, verify, login, me, logout,
+                    registerClient, requestToken, listPlans, assignPlan, selectPlan,
+                    createCheckoutSession (with upgrade/downgrade), getCheckoutSuccessHtml,
+                    customPlanRequest, listFiles, uploadFile (base64), downloadFile, deleteFile, debugState.
+                  </p>
+                </div>
               </div>
             </div>
           )}
